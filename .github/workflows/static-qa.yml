@@ -1,0 +1,36 @@
+name: Static QA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Parse and validate the self-contained page
+        run: |
+          python - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          page = Path("index.html")
+          assert page.is_file(), "index.html is missing"
+          html = page.read_text(encoding="utf-8")
+
+          class Parser(HTMLParser):
+              pass
+
+          Parser().feed(html)
+          assert "<title>The Merge — Launch Atlas</title>" in html
+          assert "http://" not in html and "https://" not in html
+          assert "<script src=" not in html
+          assert "<link rel=\"stylesheet\"" not in html
+          print(f"PASS: parsed self-contained index.html ({len(html.encode('utf-8'))} bytes)")
+          PY

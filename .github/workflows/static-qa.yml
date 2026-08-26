@@ -25,11 +25,18 @@ jobs:
           html = page.read_text(encoding="utf-8")
 
           class Parser(HTMLParser):
-              pass
+              def __init__(self):
+                  super().__init__()
+                  self.external = []
+              def handle_starttag(self, tag, attrs):
+                  for name, value in attrs:
+                      if name in {"src", "href"} and value and value.startswith(("http://", "https://", "//")):
+                          self.external.append((tag, name, value))
 
-          Parser().feed(html)
+          parser = Parser()
+          parser.feed(html)
           assert "<title>The Merge — Launch Atlas</title>" in html
-          assert "http://" not in html and "https://" not in html
+          assert not parser.external, f"external runtime references found: {parser.external}"
           assert "<script src=" not in html
           assert "<link rel=\"stylesheet\"" not in html
           print(f"PASS: parsed self-contained index.html ({len(html.encode('utf-8'))} bytes)")

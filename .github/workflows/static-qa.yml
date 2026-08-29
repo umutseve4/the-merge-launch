@@ -9,19 +9,28 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: static-qa-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      # actions/checkout v7.0.1 pinned by immutable commit SHA
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Parse and validate the self-contained page
         run: |
           python - <<'PY'
           from html.parser import HTMLParser
           from pathlib import Path
 
+          required = ["README.md", "CONTRIBUTING.md", "SECURITY.md", ".gitignore", "index.html"]
+          missing = [path for path in required if not Path(path).is_file()]
+          assert not missing, f"required repository files missing: {missing}"
+
           page = Path("index.html")
-          assert page.is_file(), "index.html is missing"
           html = page.read_text(encoding="utf-8")
 
           class Parser(HTMLParser):
@@ -38,6 +47,10 @@ jobs:
           assert "<title>The Merge — Launch Atlas</title>" in html
           assert not parser.external, f"external runtime references found: {parser.external}"
           assert "<script src=" not in html
-          assert "<link rel=\"stylesheet\"" not in html
+          assert '<link rel="stylesheet"' not in html
+
+          readme = Path("README.md").read_text(encoding="utf-8")
+          assert "fictional portfolio demo" in readme
+          assert "does not transmit or store data" in readme
           print(f"PASS: parsed self-contained index.html ({len(html.encode('utf-8'))} bytes)")
           PY

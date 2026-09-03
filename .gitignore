@@ -1,0 +1,13 @@
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python validation artifacts
+__pycache__/
+*.py[cod]
+
+# Local preview and temporary files
+*.log
+*.tmp

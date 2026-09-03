@@ -9,28 +9,47 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: static-qa-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Parse and validate the self-contained page
         run: |
           python - <<'PY'
           from html.parser import HTMLParser
           from pathlib import Path
 
-          page = Path("index.html")
-          assert page.is_file(), "index.html is missing"
-          html = page.read_text(encoding="utf-8")
+          required = ["README.md", "CONTRIBUTING.md", "SECURITY.md", ".gitignore", "index.html"]
+          missing = [path for path in required if not Path(path).is_file()]
+          assert not missing, f"required repository files missing: {missing}"
+
+          html = Path("index.html").read_text(encoding="utf-8")
 
           class Parser(HTMLParser):
               def __init__(self):
                   super().__init__()
                   self.external = []
+                  self.forms = []
+                  self.tags = []
+                  self.labels_for = set()
+                  self.control_ids = set()
               def handle_starttag(self, tag, attrs):
+                  attributes = dict(attrs)
+                  self.tags.append((tag, attributes))
+                  if tag == "form":
+                      self.forms.append(attributes)
+                  if tag == "label" and attributes.get("for"):
+                      self.labels_for.add(attributes["for"])
+                  if tag in {"input", "textarea", "select"} and attributes.get("id"):
+                      self.control_ids.add(attributes["id"])
                   for name, value in attrs:
-                      if name in {"src", "href"} and value and value.startswith(("http://", "https://", "//")):
+                      if name in {"src", "href", "srcset", "action", "formaction"} and value and value.startswith(("http://", "https://", "//")):
                           self.external.append((tag, name, value))
 
           parser = Parser()
@@ -38,6 +57,26 @@ jobs:
           assert "<title>The Merge — Launch Atlas</title>" in html
           assert not parser.external, f"external runtime references found: {parser.external}"
           assert "<script src=" not in html
-          assert "<link rel=\"stylesheet\"" not in html
+          assert '<link rel="stylesheet"' not in html
+          assert not any(tag in {"iframe", "object", "embed"} for tag, _ in parser.tags)
+
+          # The form is deliberately local-only: no submission target, network API,
+          # browser persistence API, or third-party script is allowed.
+          assert parser.forms and all(not form.get("action") for form in parser.forms)
+          forbidden_apis = ["fetch(", "XMLHttpRequest", "sendBeacon", "WebSocket(",
+                            "localStorage", "sessionStorage", "indexedDB", "document.cookie"]
+          assert not [token for token in forbidden_apis if token in html]
+
+          # Dependency-free baseline accessibility checks.
+          assert '<html lang="en">' in html
+          assert 'aria-label="Main navigation"' in html
+          assert 'aria-expanded="false"' in html
+          assert 'aria-live="polite"' in html
+          assert parser.control_ids <= parser.labels_for
+          assert "@media(prefers-reduced-motion:reduce)" in html
+
+          readme = Path("README.md").read_text(encoding="utf-8")
+          assert "fictional portfolio demo" in readme
+          assert "form inputs are not transmitted or persisted by the page code" in readme
           print(f"PASS: parsed self-contained index.html ({len(html.encode('utf-8'))} bytes)")
           PY

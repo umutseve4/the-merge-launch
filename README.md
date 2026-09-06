@@ -48,5 +48,5 @@ boundary.
 ## Limits
 
 - **This is a fictional portfolio demo.** Names, teams, launch events, resources, statuses and dates shown in the interface are illustrative — not claims about OpenAI or any real organization.
-- The contact form is a client-side interaction demo. Form inputs are not transmitted or persisted by the page code.
+- The contact form is a client-side interaction demo; form inputs are not transmitted or persisted by the page code.
 - Static validation does not establish full accessibility conformance or visual correctness; both need a separate manual pass.

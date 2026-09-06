@@ -75,8 +75,16 @@ jobs:
           assert parser.control_ids <= parser.labels_for
           assert "@media(prefers-reduced-motion:reduce)" in html
 
-          readme = Path("README.md").read_text(encoding="utf-8")
-          assert "fictional portfolio demo" in readme
-          assert "form inputs are not transmitted or persisted by the page code" in readme
+          # The README must keep disclosing that this is a demo and that the form
+          # does not transmit or persist input. Compared case-insensitively so a
+          # sentence-position edit cannot silently redden the gate; the assertion
+          # names the missing phrase instead of failing anonymously.
+          readme = Path("README.md").read_text(encoding="utf-8").casefold()
+          disclosures = [
+              "fictional portfolio demo",
+              "form inputs are not transmitted or persisted by the page code",
+          ]
+          absent = [phrase for phrase in disclosures if phrase not in readme]
+          assert not absent, f"README lost required disclosure phrases: {absent}"
           print(f"PASS: parsed self-contained index.html ({len(html.encode('utf-8'))} bytes)")
           PY

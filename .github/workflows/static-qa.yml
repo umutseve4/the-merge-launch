@@ -23,3 +23,13 @@ jobs:
       # publish gate run the identical checks instead of two copies that drift.
       - name: Parse and validate the self-contained page
         run: python scripts/validate_site.py
+
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # A green validator means nothing unless it can go red. Every condition
+      # is broken on purpose here and has to be caught.
+      - name: Prove every condition can fail
+        run: python scripts/mutation_check.py

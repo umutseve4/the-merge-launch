@@ -29,6 +29,11 @@ jobs:
       - name: Run the quality gate before publishing
         run: python scripts/validate_site.py
 
+      # And that gate has to prove it is still capable of failing, otherwise
+      # "the checks passed" is a sentence about nothing.
+      - name: Prove the gate can fail
+        run: python scripts/mutation_check.py
+
       # Pages cannot be switched on from a workflow: configure-pages with
       # enablement: true needs admin rights the default GITHUB_TOKEN does not
       # have, and it fails hard when Pages is off. That turns every run red for
@@ -79,6 +84,7 @@ jobs:
     needs: build
     if: needs.build.outputs.pages_enabled == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -86,3 +92,38 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Check out the commit that was deployed
+        uses: actions/checkout@v4
+
+      # A successful deployment only proves the artifact was accepted by the
+      # Pages service. This asks the public URL for the page and requires the
+      # bytes it returns to be the bytes in this commit, so a green run cannot
+      # mean a stale, empty or unreachable site.
+      - name: Prove the live site serves this commit
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -uo pipefail
+          expected="$(sha256sum index.html | cut -d' ' -f1)"
+          echo "committed index.html sha256: $expected"
+          for attempt in $(seq 1 12); do
+            code="$(curl -sS -L -o /tmp/live.html -w '%{http_code}' "$PAGE_URL" || echo 000)"
+            served="$(sha256sum /tmp/live.html | cut -d' ' -f1)"
+            echo "attempt $attempt: HTTP $code, served sha256 $served"
+            if [ "$code" = "200" ] && [ "$served" = "$expected" ]; then
+              {
+                echo "### Live site verified"
+                echo ""
+                echo "- URL: $PAGE_URL"
+                echo "- HTTP status: 200"
+                echo "- Served bytes match the committed index.html (sha256 $expected)"
+                echo "- Commit: $GITHUB_SHA"
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "PASS: the live URL returns exactly the bytes that passed the gate."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error title=Live site did not match::The deployment reported success but $PAGE_URL never returned the committed bytes."
+          exit 1

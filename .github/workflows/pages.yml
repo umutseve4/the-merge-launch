@@ -1,0 +1,88 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; never cancel a running one mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      pages_enabled: ${{ steps.pages_state.outputs.enabled }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # Nothing is published unless the same gate that guards main passes.
+      - name: Run the quality gate before publishing
+        run: python scripts/validate_site.py
+
+      # Pages cannot be switched on from a workflow: configure-pages with
+      # enablement: true needs admin rights the default GITHUB_TOKEN does not
+      # have, and it fails hard when Pages is off. That turns every run red for
+      # a reason that has nothing to do with the code, which is exactly the kind
+      # of noise that teaches people to ignore a red X.
+      #
+      # So the workflow asks first, and reports instead of failing.
+      - name: Is Pages switched on?
+        id: pages_state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            # A green run must never be mistaken for a published site. The job
+            # succeeded, the checks really did pass, but nothing was deployed,
+            # so it is annotated rather than left silently green.
+            echo "::warning title=Site not published::The quality gate passed, but GitHub Pages is switched off, so nothing was deployed. Settings -> Pages -> Source: GitHub Actions, then re-run."
+            {
+              echo "### Pages is not switched on yet"
+              echo ""
+              echo "The site passed every check and is ready to publish, but GitHub"
+              echo "Pages has no source configured, so there is nothing to deploy to."
+              echo ""
+              echo "**To publish:** Settings, Pages, Source: **GitHub Actions**, then"
+              echo "re-run this workflow."
+              echo ""
+              echo "This is a one-time manual step; a workflow token is not allowed"
+              echo "to do it."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Configure Pages
+        if: steps.pages_state.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+
+      # The repository root is uploaded verbatim: there is no build step, so
+      # what CI validated is byte-for-byte what visitors receive.
+      - name: Upload site
+        if: steps.pages_state.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages_enabled == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
